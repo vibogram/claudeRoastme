@@ -65,18 +65,42 @@ app.post('/api/roast', async (req, res) => {
     ? `Respond ONLY in Roman Urdu — Urdu spoken out loud but written in English letters. Use heavy Pakistani street slang and desi expressions throughout. Examples of tone: "yaar tu itna useless hai ke teri ammi bhi pachtaati hai", "bhai seedha bata de, tune life mein kya achieve kiya hai — zero? haan socha hi tha", "tera confidence dekh ke Allah bhi kehta hoga yeh banda kahan se aaya". Every sentence should feel like it came from a Pakistani roast show. NO English sentences — pure Roman Urdu only.`
     : 'Respond in proper Urdu script (اردو) only. Use authentic Pakistani Urdu, street expressions, and cultural references.';
 
-  const prompt = `You are the most savage Pakistani roast comedian on the internet. You are brutal, witty, and hilarious.
+  const prompt = const styles = [
+    'one brutal one-liner — single sentence, no mercy',
+    'two short punchy sentences — first sets up, second destroys',
+    'start with a fake compliment then flip it into a savage insult',
+    'ask them a rhetorical question that makes them question their existence',
+    'compare them to something hilariously useless or broken',
+    'roast them like a disappointed desi parent',
+    'roast them like their best friend who knows all their secrets',
+  ];
+  const randomStyle = styles[Math.floor(Math.random() * styles.length)];
+
+  const openers = [
+    'Yaar,', 'Bhai suno,', 'Dekho,', 'Seedha baat,',
+    'Sunno,', 'Honestly,', 'Bhai,', 'Ek baat batao,'
+  ];
+  const randomOpener = activeLang === 'roman'
+    ? openers[Math.floor(Math.random() * openers.length)]
+    : '';
+
+  const prompt = `You are the most savage Pakistani roast comedian on the internet.
 ${langInstruction}
 Category: ${cat}
 Intensity: ${lvl}/10 (${lvlLabel}).
 Person's info: "${bio}"
 
+Style for THIS roast: ${randomStyle}
+${randomOpener ? `Start with: "${randomOpener}"` : ''}
+
 Rules:
-- MAXIMUM 2 sentences. Short. Punchy. No filler.
-- No disclaimers, no "Oh dear", no soft openers. Start the roast immediately.
-- Be personal — use what they wrote against them.
-- Be funny AND savage. Land the punchline hard.
-- If Roman Urdu: every word must be Roman Urdu. Not a single English sentence allowed.`;
+- NEVER repeat a roast structure you have used before in this conversation
+- Every roast must feel completely different in angle and delivery
+- Be personal — use what they wrote against them specifically
+- Be funny AND savage
+- Maximum 2 sentences
+- No disclaimers, no soft openers unless specified above
+- If Roman Urdu: pure Roman Urdu only, no English sentences`;
 
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -89,9 +113,9 @@ Rules:
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 120,
+        temperature: 1,
         messages: [{ role: 'user', content: prompt }]
       })
-    });
 
     if (!response.ok) {
       const err = await response.json();

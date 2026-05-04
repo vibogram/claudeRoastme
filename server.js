@@ -21,10 +21,37 @@ app.use(cors({
   }
 }));
 
+app.use(express.json());
+
+// ── SUPABASE HELPER ──
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_KEY;
+
+async function supabase(path, method = 'GET', body = null) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
+    method,
+    headers: {
+      'apikey': SUPABASE_KEY,
+      'Authorization': `Bearer ${SUPABASE_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': method === 'POST' ? 'return=representation' : ''
+    },
+    body: body ? JSON.stringify(body) : null
+  });
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Supabase error: ${err}`);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+// ── HEALTH CHECK ──
 app.get('/', (req, res) => {
   res.json({ status: 'ok', service: 'RoastMe AI Backend' });
 });
 
+// ── GENERATE ROAST ──
 app.post('/api/roast', async (req, res) => {
   const { bio, category, language, intensity } = req.body;
 
@@ -118,6 +145,71 @@ Rules:
   } catch (err) {
     console.error('Server error:', err);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ── SUBMIT ROAST TO LEADERBOARD ──
+app.post('/api/leaderboard/submit', async (req, res) => {
+  const { victim_name, category, language, roast_text } = req.body;
+
+  if (!roast_text || !victim_name) {
+    return res.status(400).json({ error: 'Missing fields' });
+  }
+
+  // Limit roast text length
+  if (roast_text.length > 500) {
+    return res.status(400).json({ error: 'Roast too long' });
+  }
+
+  try {
+    const result = await supabase('/roasts', 'POST', {
+      victim_name: victim_name.substring(0, 30),
+      category: category || 'general',
+      language: language || 'english',
+      roast_text: roast_text.substring(0, 500),
+      votes: 0
+    });
+    res.json({ success: true, id: result?.[0]?.id });
+  } catch (err) {
+    console.error('Submit error:', err);
+    res.status(500).json({ error: 'Could not submit roast' });
+  }
+});
+
+// ── GET LEADERBOARD ──
+app.get('/api/leaderboard', async (req, res) => {
+  try {
+    const data = await supabase(
+      '/roasts?select=*&order=votes.desc&limit=10'
+    );
+    res.json(data || []);
+  } catch (err) {
+    console.error('Leaderboard error:', err);
+    res.status(500).json({ error: 'Could not fetch leaderboard' });
+  }
+});
+
+// ── UPVOTE A ROAST ──
+app.post('/api/leaderboard/vote/:id', async (req, res) => {
+  const { id } = req.params;
+
+  // Prevent duplicate votes using a simple IP check
+  const userIP = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+
+  try {
+    // Get current votes
+    const rows = await supabase(`/roasts?id=eq.${id}&select=votes`);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Roast not found' });
+    }
+
+    const newVotes = (rows[0].votes || 0) + 1;
+
+    await supabase(`/roasts?id=eq.${id}`, 'PATCH', { votes: newVotes });
+    res.json({ success: true, votes: newVotes });
+  } catch (err) {
+    console.error('Vote error:', err);
+    res.status(500).json({ error: 'Could not register vote' });
   }
 });
 

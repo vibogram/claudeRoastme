@@ -7,6 +7,12 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
+// Log environment check on startup
+const rawKey = process.env.ANTHROPIC_API_KEY || '';
+const cleanKey = rawKey.replace(/[\r\n\t\s]/g, '');
+console.log('API Key loaded:', cleanKey ? `YES (length: ${cleanKey.length})` : 'NO - MISSING');
+console.log('Frontend URL:', process.env.FRONTEND_URL || 'NOT SET');
+
 const allowedOrigins = [
   'http://localhost:5500',
   'http://127.0.0.1:5500',
@@ -24,7 +30,12 @@ app.use(cors({
 let leaderboard = [];
 
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', service: 'RoastMe AI Backend' });
+  res.json({
+    status: 'ok',
+    service: 'RoastMe AI Backend',
+    apiKeySet: !!cleanKey,
+    roastsInMemory: leaderboard.length
+  });
 });
 
 app.post('/api/roast', async (req, res) => {
@@ -32,14 +43,17 @@ app.post('/api/roast', async (req, res) => {
   if (!bio || typeof bio !== 'string') return res.status(400).json({ error: 'bio is required' });
   if (bio.length > 500) return res.status(400).json({ error: 'bio too long' });
 
-  const intensityLabels = { 1:'Mild',2:'Soft',3:'Light',4:'Medium',5:'Spicy',6:'Hot',7:'Savage',8:'Brutal',9:'Nuclear',10:'DESTROYER' };
+  const intensityLabels = {
+    1:'Mild',2:'Soft',3:'Light',4:'Medium',5:'Spicy',
+    6:'Hot',7:'Savage',8:'Brutal',9:'Nuclear',10:'DESTROYER'
+  };
   const catInstructions = {
-    general: 'Savage personality roast — attack their whole existence.',
-    career: 'Demolish their career, job, and professional life.',
+    general:       'Savage personality roast — attack their whole existence.',
+    career:        'Demolish their career, job, and professional life.',
     relationships: 'Destroy their love life and romantic history.',
-    family: 'Classic desi family roast — cousins, parents, rishta rejections.',
-    fashion: 'Obliterate their fashion sense completely.',
-    rizq: 'Roast their broke energy and bad money decisions.'
+    family:        'Classic desi family roast — cousins, parents, rishta rejections.',
+    fashion:       'Obliterate their fashion sense completely.',
+    rizq:          'Roast their broke energy and bad money decisions.'
   };
 
   const cat = catInstructions[category] || catInstructions.general;
@@ -77,12 +91,11 @@ Rules:
 - If Roman Urdu: pure Roman Urdu only, zero English sentences.`;
 
   try {
-    const apiKey = (process.env.ANTHROPIC_API_KEY || '').replace(/[\r\n\s]/g, '');
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
+        'x-api-key': cleanKey,
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
@@ -95,7 +108,7 @@ Rules:
 
     if (!response.ok) {
       const err = await response.json();
-      console.error('Anthropic error:', err);
+      console.error('Anthropic error:', JSON.stringify(err));
       return res.status(502).json({ error: 'AI service error' });
     }
 
@@ -111,50 +124,37 @@ Rules:
 });
 
 app.get('/api/leaderboard', (req, res) => {
-  try {
-    const sorted = [...leaderboard].sort((a, b) => b.votes - a.votes).slice(0, 10);
-    res.json(sorted);
-  } catch (err) {
-    res.status(500).json({ error: 'Could not fetch leaderboard' });
-  }
+  const sorted = [...leaderboard].sort((a, b) => b.votes - a.votes).slice(0, 10);
+  res.json(sorted);
 });
 
 app.post('/api/leaderboard/submit', (req, res) => {
   const { victim_name, category, language, roast_text } = req.body;
   if (!roast_text || !victim_name) return res.status(400).json({ error: 'Missing fields' });
 
-  try {
-    const newRoast = {
-      id: Date.now().toString(),
-      victim_name: victim_name.substring(0, 30),
-      category: category || 'general',
-      language: language || 'english',
-      roast_text: roast_text.substring(0, 500),
-      votes: 0,
-      created_at: new Date().toISOString()
-    };
-    leaderboard.push(newRoast);
-    if (leaderboard.length > 100) {
-      leaderboard = leaderboard.sort((a, b) => b.votes - a.votes).slice(0, 100);
-    }
-    console.log(`Roast submitted: ${victim_name} | Total: ${leaderboard.length}`);
-    res.json({ success: true, id: newRoast.id });
-  } catch (err) {
-    console.error('Submit error:', err);
-    res.status(500).json({ error: 'Could not submit' });
+  const newRoast = {
+    id: Date.now().toString(),
+    victim_name: victim_name.substring(0, 30),
+    category: category || 'general',
+    language: language || 'english',
+    roast_text: roast_text.substring(0, 500),
+    votes: 0,
+    created_at: new Date().toISOString()
+  };
+  leaderboard.push(newRoast);
+  if (leaderboard.length > 100) {
+    leaderboard = leaderboard.sort((a, b) => b.votes - a.votes).slice(0, 100);
   }
+  console.log(`Roast submitted by: ${victim_name} | Total roasts: ${leaderboard.length}`);
+  res.json({ success: true, id: newRoast.id });
 });
 
 app.post('/api/leaderboard/vote/:id', (req, res) => {
   const { id } = req.params;
-  try {
-    const roast = leaderboard.find(r => r.id === id);
-    if (!roast) return res.status(404).json({ error: 'Not found' });
-    roast.votes += 1;
-    res.json({ success: true, votes: roast.votes });
-  } catch (err) {
-    res.status(500).json({ error: 'Could not vote' });
-  }
+  const roast = leaderboard.find(r => r.id === id);
+  if (!roast) return res.status(404).json({ error: 'Not found' });
+  roast.votes += 1;
+  res.json({ success: true, votes: roast.votes });
 });
 
 app.listen(PORT, () => {

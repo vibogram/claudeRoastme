@@ -61,6 +61,110 @@ app.post('/api/roast', async (req, res) => {
   const lvlLabel = intensityLabels[lvl] || 'Savage';
 
   const langInstruction = language === 'english'
+    ? 'Write all roasts in English only. Use desi/Pakistani cultural references.'
+    : language === 'roman'
+    ? 'Write all roasts in Roman Urdu ONLY — Urdu spoken out loud written in English letters. Heavy Pakistani street slang. Zero English sentences. Every single roast must be pure Roman Urdu.'
+    : 'Write all roasts in proper Urdu script only.';
+
+  const prompt = `You are the most savage Pakistani roast comedian. 
+${langInstruction}
+Category: ${cat}
+Intensity: ${lvl}/10 (${lvlLabel})
+Person: "${bio}"
+
+Write exactly 5 roasts about this person. Number them 1 to 5.
+Each roast MUST use a completely different structure, tone and angle:
+1. A brutal one-liner — one sentence only, hits like a slap
+2. Start with a fake compliment, then completely destroy them in the second sentence
+3. Compare them to something hilariously useless and explain why they are exactly like it
+4. Write it like a disappointed Pakistani parent talking about their child at a dawat
+5. Ask one rhetorical question that makes them question their entire existence
+
+Hard rules:
+- Each roast maximum 2 sentences
+- NEVER use: chai, buffering, WiFi, GPS, CCTV, 1% battery, loading
+- Be personal — use what they actually wrote
+- Make each one feel completely different in wording and structure
+- No disclaimers, no soft openers, no numbering labels like "Roast 1:" — just the number and the roast
+- If Roman Urdu: every word of every roast must be Roman Urdu, zero English`;
+
+  try {
+    const apiKey = (process.env.ANTHROPIC_API_KEY || '').replace(/[\r\n\t\s]/g, '');
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 500,
+        temperature: 1,
+        top_p: 0.95,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    if (!response.ok) {
+      const err = await response.json();
+      console.error('Anthropic error:', JSON.stringify(err));
+      return res.status(502).json({ error: 'AI service error' });
+    }
+
+    const data = await response.json();
+    const raw = data.content?.[0]?.text?.trim();
+    if (!raw) return res.status(502).json({ error: 'Empty response' });
+
+    // Parse the 5 numbered roasts
+    const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+    const roasts = [];
+    let current = '';
+
+    for (const line of lines) {
+      // Check if line starts with a number like "1." or "1)" or just "1"
+      const isNewRoast = /^[1-5][\.\)]\s/.test(line) || /^[1-5]\s/.test(line);
+      if (isNewRoast) {
+        if (current) roasts.push(current.trim());
+        current = line.replace(/^[1-5][\.\)]\s*/, '').replace(/^[1-5]\s*/, '');
+      } else if (current) {
+        current += ' ' + line;
+      }
+    }
+    if (current) roasts.push(current.trim());
+
+    // Make sure we have roasts
+    const validRoasts = roasts.filter(r => r.length > 10);
+    if (validRoasts.length === 0) {
+      return res.status(502).json({ error: 'Could not parse roasts' });
+    }
+
+    console.log(`Generated ${validRoasts.length} roasts for: ${bio.substring(0,20)}`);
+    res.json({ roasts: validRoasts });
+
+  } catch (err) {
+    console.error('Server error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+  const intensityLabels = {
+    1:'Mild',2:'Soft',3:'Light',4:'Medium',5:'Spicy',
+    6:'Hot',7:'Savage',8:'Brutal',9:'Nuclear',10:'DESTROYER'
+  };
+  const catInstructions = {
+    general:       'Savage personality roast — attack their whole existence.',
+    career:        'Demolish their career, job, and professional life.',
+    relationships: 'Destroy their love life and romantic history.',
+    family:        'Classic desi family roast — cousins, parents, rishta rejections.',
+    fashion:       'Obliterate their fashion sense completely.',
+    rizq:          'Roast their broke energy and bad money decisions.'
+  };
+
+  const cat = catInstructions[category] || catInstructions.general;
+  const lvl = parseInt(intensity) || 7;
+  const lvlLabel = intensityLabels[lvl] || 'Savage';
+
+  const langInstruction = language === 'english'
     ? 'Respond in English only. Use desi references and Pakistani cultural context.'
     : language === 'roman'
     ? 'Respond ONLY in Roman Urdu — Urdu written in English letters. Heavy Pakistani street slang. NO English sentences at all.'

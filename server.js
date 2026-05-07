@@ -66,30 +66,51 @@ app.post('/api/roast', async (req, res) => {
     ? 'Respond ONLY in Roman Urdu — Urdu written in English letters. Heavy Pakistani street slang. NO English sentences at all.'
     : 'Respond in proper Urdu script only. Use authentic Pakistani Urdu expressions.';
 
-  const styles = [
-    'one brutal one-liner — single sentence, no mercy',
-    'two short punchy sentences — first sets up, second destroys',
-    'start with a fake compliment then flip it into a savage insult',
-    'ask a rhetorical question that makes them question their existence',
-    'compare them to something hilariously useless or broken',
-    'roast them like a disappointed desi parent',
-    'roast them like their best friend who knows all their secrets',
+ const styles = [
+    'one brutal one-liner — single sentence, no mercy, land it like a slap',
+    'two sentences — first lull them with something almost nice, second sentence destroys them completely',
+    'ask them one rhetorical question that makes them question every life decision they have made',
+    'compare them to a broken or useless everyday object and explain exactly why',
+    'roast them like a disappointed Pakistani father reading their results',
+    'roast them like their best friend who has been holding this in for years',
+    'start with "Bhai suno..." and then destroy their entire personality in one breath',
+    'roast them like a disappointed desi mother at a rishta meeting',
+    'roast them like a Pakistani uncle at a dawat who corners you near the biryani',
+    'make an analogy — "Tu bilkul X ki tarah hai" — and make X hilariously specific and insulting',
   ];
-  const randomStyle = styles[Math.floor(Math.random() * styles.length)];
 
-  const prompt = `You are the most savage Pakistani roast comedian on the internet.
+  const angles = [
+    'focus on their lack of ambition',
+    'focus on how average and forgettable they are',
+    'focus on their overconfidence vs zero results',
+    'focus on how their friends secretly pity them',
+    'focus on their relationship with failure',
+    'focus on how even inanimate objects perform better than them',
+    'focus on their delusional self-image',
+    'focus on what their ammi secretly thinks of them',
+  ];
+
+  const randomStyle = styles[Math.floor(Math.random() * styles.length)];
+  const randomAngle = angles[Math.floor(Math.random() * angles.length)];
+  const randomSeed = Math.floor(Math.random() * 9999);
+
+  const prompt = `You are the most savage Pakistani roast comedian on the internet. Every roast you write is completely unique.
 ${langInstruction}
 Category: ${cat}
-Intensity: ${lvl}/10 (${lvlLabel}).
+Intensity: ${lvl}/10 (${lvlLabel})
 Person info: "${bio}"
-Style for THIS roast: ${randomStyle}
+Delivery style: ${randomStyle}
+Angle to attack: ${randomAngle}
+Random seed (use this to make your response unique): ${randomSeed}
+
 Rules:
 - Maximum 2 sentences. Short and punchy.
-- Be personal — use what they wrote against them.
-- Be funny AND savage.
-- No disclaimers or soft openers.
-- If Roman Urdu: pure Roman Urdu only, zero English sentences.`;
-
+- NEVER use these overused phrases: "tu wo chai hai", "buffering", "CCTV", "GPS", "WiFi", "1% battery"
+- Be personal — use what they actually wrote against them specifically
+- Every roast must feel completely different in structure and wording from any previous roast
+- Be funny AND savage — land the punchline hard
+- No disclaimers or soft openers
+- If Roman Urdu: pure Roman Urdu only, zero English sentences`;
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',

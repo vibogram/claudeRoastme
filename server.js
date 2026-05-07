@@ -123,6 +123,7 @@ Rules:
         model: 'claude-sonnet-4-20250514',
         max_tokens: 120,
         temperature: 1,
+        top_p: 0.95,,
         messages: [{ role: 'user', content: prompt }]
       })
     });

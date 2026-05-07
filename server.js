@@ -21,59 +21,25 @@ app.use(cors({
   }
 }));
 
-app.use(express.json());
+let leaderboard = [];
 
-// ── SUPABASE HELPER ──
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_KEY;
-
-async function supabase(path, method = 'GET', body = null) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1${path}`, {
-    method,
-    headers: {
-      'apikey': SUPABASE_KEY,
-      'Authorization': `Bearer ${SUPABASE_KEY}`,
-      'Content-Type': 'application/json',
-      'Prefer': method === 'POST' ? 'return=representation' : ''
-    },
-    body: body ? JSON.stringify(body) : null
-  });
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Supabase error: ${err}`);
-  }
-  const text = await res.text();
-  return text ? JSON.parse(text) : null;
-}
-
-// ── HEALTH CHECK ──
 app.get('/', (req, res) => {
   res.json({ status: 'ok', service: 'RoastMe AI Backend' });
 });
 
-// ── GENERATE ROAST ──
 app.post('/api/roast', async (req, res) => {
   const { bio, category, language, intensity } = req.body;
+  if (!bio || typeof bio !== 'string') return res.status(400).json({ error: 'bio is required' });
+  if (bio.length > 500) return res.status(400).json({ error: 'bio too long' });
 
-  if (!bio || typeof bio !== 'string') {
-    return res.status(400).json({ error: 'bio is required' });
-  }
-  if (bio.length > 500) {
-    return res.status(400).json({ error: 'bio too long (max 500 chars)' });
-  }
-
-  const intensityLabels = {
-    1:'Mild', 2:'Soft', 3:'Light', 4:'Medium', 5:'Spicy',
-    6:'Hot', 7:'Savage', 8:'Brutal', 9:'Nuclear', 10:'DESTROYER'
-  };
-
+  const intensityLabels = { 1:'Mild',2:'Soft',3:'Light',4:'Medium',5:'Spicy',6:'Hot',7:'Savage',8:'Brutal',9:'Nuclear',10:'DESTROYER' };
   const catInstructions = {
-    general:       'Savage personality roast — attack their whole existence.',
-    career:        'Demolish their career, job, and professional life.',
+    general: 'Savage personality roast — attack their whole existence.',
+    career: 'Demolish their career, job, and professional life.',
     relationships: 'Destroy their love life and romantic history.',
-    family:        'Classic desi family roast — cousins, parents, rishta rejections.',
-    fashion:       'Obliterate their fashion sense completely.',
-    rizq:          'Roast their broke energy and bad money decisions.'
+    family: 'Classic desi family roast — cousins, parents, rishta rejections.',
+    fashion: 'Obliterate their fashion sense completely.',
+    rizq: 'Roast their broke energy and bad money decisions.'
   };
 
   const cat = catInstructions[category] || catInstructions.general;
@@ -103,7 +69,6 @@ Category: ${cat}
 Intensity: ${lvl}/10 (${lvlLabel}).
 Person info: "${bio}"
 Style for THIS roast: ${randomStyle}
-
 Rules:
 - Maximum 2 sentences. Short and punchy.
 - Be personal — use what they wrote against them.
@@ -112,11 +77,12 @@ Rules:
 - If Roman Urdu: pure Roman Urdu only, zero English sentences.`;
 
   try {
+    const apiKey = (process.env.ANTHROPIC_API_KEY || '').replace(/[\r\n\s]/g, '');
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'x-api-key': apiKey,
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
@@ -135,11 +101,7 @@ Rules:
 
     const data = await response.json();
     const roast = data.content?.[0]?.text?.trim();
-
-    if (!roast) {
-      return res.status(502).json({ error: 'Empty response from AI' });
-    }
-
+    if (!roast) return res.status(502).json({ error: 'Empty response' });
     res.json({ roast });
 
   } catch (err) {
@@ -148,68 +110,50 @@ Rules:
   }
 });
 
-// ── SUBMIT ROAST TO LEADERBOARD ──
-app.post('/api/leaderboard/submit', async (req, res) => {
-  const { victim_name, category, language, roast_text } = req.body;
-
-  if (!roast_text || !victim_name) {
-    return res.status(400).json({ error: 'Missing fields' });
-  }
-
-  // Limit roast text length
-  if (roast_text.length > 500) {
-    return res.status(400).json({ error: 'Roast too long' });
-  }
-
+app.get('/api/leaderboard', (req, res) => {
   try {
-    const result = await supabase('/roasts', 'POST', {
-      victim_name: victim_name.substring(0, 30),
-      category: category || 'general',
-      language: language || 'english',
-      roast_text: roast_text.substring(0, 500),
-      votes: 0
-    });
-    res.json({ success: true, id: result?.[0]?.id });
+    const sorted = [...leaderboard].sort((a, b) => b.votes - a.votes).slice(0, 10);
+    res.json(sorted);
   } catch (err) {
-    console.error('Submit error:', err);
-    res.status(500).json({ error: 'Could not submit roast' });
-  }
-});
-
-// ── GET LEADERBOARD ──
-app.get('/api/leaderboard', async (req, res) => {
-  try {
-    const data = await supabase(
-      '/roasts?select=*&order=votes.desc&limit=10'
-    );
-    res.json(data || []);
-  } catch (err) {
-    console.error('Leaderboard error:', err);
     res.status(500).json({ error: 'Could not fetch leaderboard' });
   }
 });
 
-// ── UPVOTE A ROAST ──
-app.post('/api/leaderboard/vote/:id', async (req, res) => {
-  const { id } = req.params;
-
-  // Prevent duplicate votes using a simple IP check
-  const userIP = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+app.post('/api/leaderboard/submit', (req, res) => {
+  const { victim_name, category, language, roast_text } = req.body;
+  if (!roast_text || !victim_name) return res.status(400).json({ error: 'Missing fields' });
 
   try {
-    // Get current votes
-    const rows = await supabase(`/roasts?id=eq.${id}&select=votes`);
-    if (!rows || rows.length === 0) {
-      return res.status(404).json({ error: 'Roast not found' });
+    const newRoast = {
+      id: Date.now().toString(),
+      victim_name: victim_name.substring(0, 30),
+      category: category || 'general',
+      language: language || 'english',
+      roast_text: roast_text.substring(0, 500),
+      votes: 0,
+      created_at: new Date().toISOString()
+    };
+    leaderboard.push(newRoast);
+    if (leaderboard.length > 100) {
+      leaderboard = leaderboard.sort((a, b) => b.votes - a.votes).slice(0, 100);
     }
-
-    const newVotes = (rows[0].votes || 0) + 1;
-
-    await supabase(`/roasts?id=eq.${id}`, 'PATCH', { votes: newVotes });
-    res.json({ success: true, votes: newVotes });
+    console.log(`Roast submitted: ${victim_name} | Total: ${leaderboard.length}`);
+    res.json({ success: true, id: newRoast.id });
   } catch (err) {
-    console.error('Vote error:', err);
-    res.status(500).json({ error: 'Could not register vote' });
+    console.error('Submit error:', err);
+    res.status(500).json({ error: 'Could not submit' });
+  }
+});
+
+app.post('/api/leaderboard/vote/:id', (req, res) => {
+  const { id } = req.params;
+  try {
+    const roast = leaderboard.find(r => r.id === id);
+    if (!roast) return res.status(404).json({ error: 'Not found' });
+    roast.votes += 1;
+    res.json({ success: true, votes: roast.votes });
+  } catch (err) {
+    res.status(500).json({ error: 'Could not vote' });
   }
 });
 

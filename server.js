@@ -29,7 +29,6 @@ function readBin() {
   return fetch('https://api.jsonbin.io/v3/b/' + BIN_ID + '/latest', {
     method: 'GET',
     headers: {
-      'X-Master-Key': BIN_KEY,
       'X-Bin-Meta': 'false'
     }
   }).then(function(res) {

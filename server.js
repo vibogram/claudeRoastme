@@ -20,67 +20,22 @@ app.use(cors({
   }
 }));
 
-var SHEETS_ID  = process.env.SHEETS_ID;
-var SHEETS_KEY = process.env.SHEETS_KEY;
-var SHEET_NAME = 'Sheet1';
-
-// Read all rows from Google Sheet
-async function readSheet() {
-  var url = 'https://sheets.googleapis.com/v4/spreadsheets/'
-    + SHEETS_ID + '/values/' + SHEET_NAME + '?key=' + SHEETS_KEY;
-  var res = await fetch(url);
-  if (!res.ok) throw new Error('Sheet read failed: ' + res.status);
-  var data = await res.json();
-  var rows = data.values || [];
-  if (rows.length <= 1) return []; // only header or empty
-  var headers = rows[0];
-  return rows.slice(1).map(function(row, i) {
-    var obj = {};
-    headers.forEach(function(h, j) { obj[h] = row[j] || ''; });
-    obj._rowIndex = i + 2; // actual sheet row number (1-based + header)
-    return obj;
-  });
-}
-
-// Append a new row
-async function appendRow(values) {
-  var url = 'https://sheets.googleapis.com/v4/spreadsheets/'
-    + SHEETS_ID + '/values/' + SHEET_NAME + ':append'
-    + '?valueInputOption=RAW&key=' + SHEETS_KEY;
-  var res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ values: [values] })
-  });
-  if (!res.ok) throw new Error('Sheet append failed: ' + res.status);
-  return res.json();
-}
-
-// Update votes in a specific row
-async function updateVotes(rowIndex, newVotes) {
-  var range = SHEET_NAME + '!F' + rowIndex; // F = votes column
-  var url = 'https://sheets.googleapis.com/v4/spreadsheets/'
-    + SHEETS_ID + '/values/' + range
-    + '?valueInputOption=RAW&key=' + SHEETS_KEY;
-  var res = await fetch(url, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ values: [[newVotes.toString()]] })
-  });
-  if (!res.ok) throw new Error('Sheet update failed: ' + res.status);
-  return res.json();
-}
+var SHEETDB_URL = process.env.SHEETDB_URL;
 
 // ── HEALTH CHECK ──
 app.get('/', function(req, res) {
-  res.json({ status: 'ok', service: 'RoastMe AI Backend', sheetsConfigured: !!(SHEETS_ID && SHEETS_KEY) });
+  res.json({
+    status: 'ok',
+    service: 'RoastMe AI Backend',
+    sheetdb: !!SHEETDB_URL
+  });
 });
 
 // ── GENERATE ROAST ──
 app.post('/api/roast', async function(req, res) {
-  var bio      = req.body.bio;
-  var category = req.body.category;
-  var language = req.body.language;
+  var bio       = req.body.bio;
+  var category  = req.body.category;
+  var language  = req.body.language;
   var intensity = req.body.intensity;
 
   if (!bio || typeof bio !== 'string') return res.status(400).json({ error: 'bio is required' });
@@ -183,20 +138,28 @@ app.post('/api/roast', async function(req, res) {
 // ── GET LEADERBOARD ──
 app.get('/api/leaderboard', async function(req, res) {
   try {
-    var rows = await readSheet();
-    var sorted = rows.sort(function(a, b) {
-      return parseInt(b.votes || 0) - parseInt(a.votes || 0);
-    }).slice(0, 10).map(function(r) {
-      return {
-        id: r.id,
-        victim_name: r.victim_name,
-        category: r.category,
-        language: r.language,
-        roast_text: r.roast_text,
-        votes: parseInt(r.votes || 0),
-        _rowIndex: r._rowIndex
-      };
-    });
+    var response = await fetch(SHEETDB_URL + '?limit=100');
+    if (!response.ok) throw new Error('SheetDB read failed: ' + response.status);
+    var rows = await response.json();
+
+    // Sort by votes descending, return top 10
+    var sorted = rows
+      .filter(function(r) { return r.roast_text; })
+      .sort(function(a, b) {
+        return parseInt(b.votes || 0) - parseInt(a.votes || 0);
+      })
+      .slice(0, 10)
+      .map(function(r) {
+        return {
+          id: r.id,
+          victim_name: r.victim_name || '',
+          category: r.category || 'general',
+          language: r.language || 'english',
+          roast_text: r.roast_text || '',
+          votes: parseInt(r.votes || 0)
+        };
+      });
+
     res.json(sorted);
   } catch (err) {
     console.error('Leaderboard error:', err.message);
@@ -215,16 +178,30 @@ app.post('/api/leaderboard/submit', async function(req, res) {
 
   try {
     var newId = Date.now().toString();
-    await appendRow([
-      newId,
-      victim_name.substring(0, 30),
-      category || 'general',
-      language || 'english',
-      roast_text.substring(0, 500),
-      '0'
-    ]);
+    var response = await fetch(SHEETDB_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        data: [{
+          id: newId,
+          victim_name: victim_name.substring(0, 30),
+          category: category || 'general',
+          language: language || 'english',
+          roast_text: roast_text.substring(0, 500),
+          votes: '0'
+        }]
+      })
+    });
+
+    if (!response.ok) {
+      var errText = await response.text();
+      console.error('SheetDB submit error:', errText);
+      return res.status(500).json({ error: 'Could not submit' });
+    }
+
     console.log('Submitted roast by: ' + victim_name);
     res.json({ success: true, id: newId });
+
   } catch (err) {
     console.error('Submit error:', err.message);
     res.status(500).json({ error: 'Could not submit' });
@@ -235,15 +212,25 @@ app.post('/api/leaderboard/submit', async function(req, res) {
 app.post('/api/leaderboard/vote/:id', async function(req, res) {
   var id = req.params.id;
   try {
-    var rows = await readSheet();
-    var found = null;
-    for (var i = 0; i < rows.length; i++) {
-      if (rows[i].id === id) { found = rows[i]; break; }
-    }
-    if (!found) return res.status(404).json({ error: 'Not found' });
-    var newVotes = parseInt(found.votes || 0) + 1;
-    await updateVotes(found._rowIndex, newVotes);
+    // Get current record
+    var getRes = await fetch(SHEETDB_URL + '/search?id=' + id);
+    if (!getRes.ok) throw new Error('Could not find record');
+    var records = await getRes.json();
+    if (!records || records.length === 0) return res.status(404).json({ error: 'Not found' });
+
+    var currentVotes = parseInt(records[0].votes || 0);
+    var newVotes = currentVotes + 1;
+
+    // Update votes
+    var patchRes = await fetch(SHEETDB_URL + '/id/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: { votes: newVotes.toString() } })
+    });
+
+    if (!patchRes.ok) throw new Error('Could not update votes');
     res.json({ success: true, votes: newVotes });
+
   } catch (err) {
     console.error('Vote error:', err.message);
     res.status(500).json({ error: 'Could not vote' });
@@ -252,5 +239,5 @@ app.post('/api/leaderboard/vote/:id', async function(req, res) {
 
 app.listen(PORT, function() {
   console.log('RoastMe backend running on port ' + PORT);
-  console.log('Google Sheets configured:', !!(SHEETS_ID && SHEETS_KEY));
+  console.log('SheetDB configured:', !!SHEETDB_URL);
 });

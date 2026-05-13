@@ -92,7 +92,7 @@ app.post('/api/roast', async function(req, res) {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-5',
         max_tokens: 500,
         temperature: 1,
         top_p: 0.95,
@@ -138,28 +138,23 @@ app.post('/api/roast', async function(req, res) {
 // ── GET LEADERBOARD ──
 app.get('/api/leaderboard', async function(req, res) {
   try {
-    var response = await fetch(SHEETDB_URL + '?limit=100');
+    var url = SHEETDB_URL + '?limit=500';
+    var response = await fetch(url);
     if (!response.ok) throw new Error('SheetDB read failed: ' + response.status);
     var rows = await response.json();
-
-    // Sort by votes descending, return top 10
-    var sorted = rows
-      .filter(function(r) { return r.roast_text; })
-      .sort(function(a, b) {
-        return parseInt(b.votes || 0) - parseInt(a.votes || 0);
-      })
-      .slice(0, 10)
-      .map(function(r) {
-        return {
-          id: r.id,
-          victim_name: r.victim_name || '',
-          category: r.category || 'general',
-          language: r.language || 'english',
-          roast_text: r.roast_text || '',
-          votes: parseInt(r.votes || 0)
-        };
-      });
-
+    var valid = rows.filter(function(r) { return r.roast_text; });
+    var sorted = valid.sort(function(a, b) {
+      return parseInt(b.votes || 0) - parseInt(a.votes || 0);
+    }).map(function(r) {
+      return {
+        id: r.id,
+        victim_name: r.victim_name || '',
+        category: r.category || 'general',
+        language: r.language || 'english',
+        roast_text: r.roast_text || '',
+        votes: parseInt(r.votes || 0)
+      };
+    });
     res.json(sorted);
   } catch (err) {
     console.error('Leaderboard error:', err.message);

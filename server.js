@@ -91,15 +91,12 @@ app.post('/api/roast', async function(req, res) {
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01'
       },
-      body: JSON.stringify({
+body: JSON.stringify({
         model: 'claude-sonnet-4-5',
         max_tokens: 500,
         temperature: 1,
-        top_p: 0.95,
         messages: [{ role: 'user', content: prompt }]
       })
-    });
-
     if (!response.ok) {
       var errBody = await response.json();
       console.error('Anthropic error:', JSON.stringify(errBody));

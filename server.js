@@ -97,6 +97,7 @@ body: JSON.stringify({
         temperature: 1,
         messages: [{ role: 'user', content: prompt }]
       })
+  
     if (!response.ok) {
       var errBody = await response.json();
       console.error('Anthropic error:', JSON.stringify(errBody));
